@@ -11,6 +11,7 @@ import { Article, ArticleRow } from '@/types/article';
  *   id TEXT PRIMARY KEY,
  *   title TEXT NOT NULL,
  *   description TEXT,
+ *   summary_ko TEXT,
  *   source_url TEXT UNIQUE NOT NULL,
  *   published_at TIMESTAMP NOT NULL,
  *   platform TEXT NOT NULL CHECK (platform IN ('android', 'ios', 'web', 'backend')),
@@ -20,6 +21,7 @@ import { Article, ArticleRow } from '@/types/article';
  *
  * CREATE INDEX IF NOT EXISTS idx_articles_platform ON articles(platform);
  * CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at DESC);
+ * CREATE INDEX IF NOT EXISTS idx_articles_has_summary ON articles(summary_ko) WHERE summary_ko IS NOT NULL;
  */
 
 /**
@@ -62,6 +64,7 @@ export async function createArticlesTable() {
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     description TEXT,
+    summary_ko TEXT,
     source_url TEXT UNIQUE NOT NULL,
     published_at TIMESTAMP NOT NULL,
     platform TEXT NOT NULL CHECK (platform IN ('android', 'ios', 'web', 'backend')),
@@ -71,6 +74,7 @@ export async function createArticlesTable() {
 
   CREATE INDEX IF NOT EXISTS idx_articles_platform ON articles(platform);
   CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_articles_has_summary ON articles(summary_ko) WHERE summary_ko IS NOT NULL;
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   `);
 
@@ -93,7 +97,11 @@ export async function insertArticle(article: Omit<Article, 'created_at'>) {
       .insert({
         id: article.id,
         title: article.title,
+        title_ko: article.title_ko,
         description: article.description,
+        summary_ko: article.summary_ko,
+        keywords: article.keywords,
+        content_summary: article.content_summary,
         source_url: article.source_url,
         published_at: article.published_at.toISOString(),
         platform: article.platform,
@@ -200,6 +208,66 @@ export async function articleExists(sourceUrl: string): Promise<boolean> {
     return data && data.length > 0;
   } catch (error) {
     console.error('Error checking article existence:', error);
+    return false;
+  }
+}
+
+/**
+ * ID로 특정 기사를 조회하는 함수
+ */
+export async function getArticleById(id: string): Promise<Article | null> {
+  try {
+    const { data, error } = await supabase
+      .from('articles')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      console.error('Error getting article by ID:', error);
+      return null;
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    // 문자열 날짜를 Date 객체로 변환
+    const article: Article = {
+      ...data,
+      published_at: new Date(data.published_at),
+      created_at: new Date(data.created_at),
+    };
+
+    return article;
+  } catch (error) {
+    console.error('Error getting article by ID:', error);
+    return null;
+  }
+}
+
+/**
+ * Article의 content_summary를 업데이트하는 함수
+ */
+export async function updateArticleContentSummary(
+  id: string,
+  contentSummary: string
+): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('articles')
+      .update({ content_summary: contentSummary })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error updating article content summary:', error);
+      return false;
+    }
+
+    console.log(`Article content_summary updated: ${id}`);
+    return true;
+  } catch (error) {
+    console.error('Error updating article content summary:', error);
     return false;
   }
 }

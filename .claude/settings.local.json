@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --version:*)",
+      "Bash(npm --version:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run build:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(node -c:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

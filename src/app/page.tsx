@@ -1,64 +1,88 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import Header from '@/components/Header';
+import FilterBar from '@/components/FilterBar';
+import ArticleList from '@/components/ArticleList';
+
+type Article = {
+  id: string;
+  title: string;
+  title_ko: string | null;
+  description: string;
+  summary_ko: string | null;
+  keywords: string[] | null;
+  content_summary: string | null;
+  source_url: string;
+  published_at: string;
+  platform: string;
+  content_type: 'blog' | 'video';
+  created_at: string;
+  is_bookmarked?: boolean;
+};
 
 export default function Home() {
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  // 상태 관리
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  /**
-   * RSS 피드를 파싱하고 데이터베이스에 저장
-   */
-  const handleFetchRSS = async () => {
+  // 필터 상태
+  const [days, setDays] = useState(7);
+  const [contentType, setContentType] = useState<'all' | 'blog' | 'video'>('all');
+  const [showBookmarked, setShowBookmarked] = useState(false);
+
+  // 페이지네이션 상태
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+
+  // 읽은 글 & 북마크 상태 (localStorage)
+  const [readArticles, setReadArticles] = useState<Set<string>>(new Set());
+  const [bookmarkedArticles, setBookmarkedArticles] = useState<Set<string>>(new Set());
+
+  // localStorage에서 읽은 글 & 북마크 로드
+  useEffect(() => {
+    const savedReadArticles = localStorage.getItem('devdigest_read_articles');
+    const savedBookmarkedArticles = localStorage.getItem('devdigest_bookmarked_articles');
+
+    if (savedReadArticles) {
+      setReadArticles(new Set(JSON.parse(savedReadArticles)));
+    }
+
+    if (savedBookmarkedArticles) {
+      setBookmarkedArticles(new Set(JSON.parse(savedBookmarkedArticles)));
+    }
+  }, []);
+
+  // 기사 데이터 로드
+  const fetchArticles = async (page: number = 1) => {
     setLoading(true);
     setError(null);
-    setResult(null);
 
     try {
-      console.log('Fetching RSS feeds...');
-
-      const response = await fetch('/api/rss/fetch', {
-        method: 'POST',
+      // API URL 구성
+      const params = new URLSearchParams({
+        platform: 'android',
+        days: days.toString(),
+        page: page.toString(),
+        limit: '12',
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch RSS feeds');
+      // content_type 필터 추가 (전체가 아닌 경우만)
+      if (contentType !== 'all') {
+        params.append('content_type', contentType);
       }
 
-      console.log('RSS fetch result:', data);
-      setResult(data);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Error fetching RSS:', errorMessage);
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * 저장된 기사 목록을 불러오기
-   */
-  const handleLoadArticles = async () => {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-
-    try {
-      console.log('Loading articles...');
-
-      const response = await fetch('/api/articles?platform=android&days=7');
+      const response = await fetch(`/api/articles?${params.toString()}`);
       const data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to load articles');
       }
 
-      console.log('Articles loaded:', data);
-      setResult(data);
+      setArticles(data.data || []);
+      setCurrentPage(data.page || 1);
+      setTotalPages(data.totalPages || 1);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error('Error loading articles:', errorMessage);
@@ -68,65 +92,81 @@ export default function Home() {
     }
   };
 
+  // 초기 로드 및 필터 변경 시 데이터 다시 로드
+  useEffect(() => {
+    setCurrentPage(1); // 필터 변경 시 첫 페이지로 리셋
+    fetchArticles(1);
+  }, [days, contentType]);
+
+  // 읽음 처리 핸들러
+  const handleRead = (articleId: string) => {
+    const newReadArticles = new Set(readArticles);
+    newReadArticles.add(articleId);
+    setReadArticles(newReadArticles);
+    localStorage.setItem('devdigest_read_articles', JSON.stringify([...newReadArticles]));
+  };
+
+  // 북마크 토글 핸들러
+  const handleBookmark = (articleId: string) => {
+    const newBookmarkedArticles = new Set(bookmarkedArticles);
+
+    if (newBookmarkedArticles.has(articleId)) {
+      newBookmarkedArticles.delete(articleId);
+    } else {
+      newBookmarkedArticles.add(articleId);
+    }
+
+    setBookmarkedArticles(newBookmarkedArticles);
+    localStorage.setItem('devdigest_bookmarked_articles', JSON.stringify([...newBookmarkedArticles]));
+  };
+
+  // 재시도 핸들러
+  const handleRetry = () => {
+    fetchArticles(currentPage);
+  };
+
+  // 페이지 변경 핸들러
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    fetchArticles(page);
+    // 페이지 변경 시 스크롤을 상단으로 이동
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // 북마크 필터 적용
+  const filteredArticles = showBookmarked
+    ? articles.filter(article => bookmarkedArticles.has(article.id))
+    : articles;
+
+  // 북마크 정보를 articles에 추가
+  const articlesWithBookmarks = filteredArticles.map(article => ({
+    ...article,
+    is_bookmarked: bookmarkedArticles.has(article.id),
+  }));
+
   return (
-    <div className="min-h-screen p-8 pb-20 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold mb-8">DevDigest</h1>
-
-        <div className="mb-8 space-x-4">
-          <button
-            onClick={handleFetchRSS}
-            disabled={loading}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            {loading ? 'Processing...' : 'Test RSS Fetch'}
-          </button>
-
-          <button
-            onClick={handleLoadArticles}
-            disabled={loading}
-            className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            {loading ? 'Loading...' : 'Load Articles'}
-          </button>
-        </div>
-
-        {error && (
-          <div className="mb-8 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
-            <h3 className="font-bold mb-2">Error:</h3>
-            <p>{error}</p>
-          </div>
-        )}
-
-        {result && (
-          <div className="mb-8">
-            <h2 className="text-2xl font-bold mb-4">Result:</h2>
-            <pre className="bg-gray-100 p-4 rounded-lg overflow-auto max-h-[600px] text-sm">
-              {JSON.stringify(result, null, 2)}
-            </pre>
-          </div>
-        )}
-
-        <div className="mt-12 p-6 bg-gray-50 rounded-lg">
-          <h2 className="text-xl font-bold mb-4">사용 방법</h2>
-          <ol className="list-decimal list-inside space-y-2 text-gray-700">
-            <li>
-              <strong>Test RSS Fetch</strong>: RSS 피드를 파싱하고 데이터베이스에 저장합니다.
-            </li>
-            <li>
-              <strong>Load Articles</strong>: 저장된 기사 목록을 불러옵니다. (최근 7일, Android 플랫폼)
-            </li>
-            <li>결과는 JSON 형식으로 화면에 표시됩니다.</li>
-          </ol>
-
-          <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded">
-            <p className="text-sm text-yellow-800">
-              <strong>주의:</strong> RSS Fetch를 실행하기 전에 환경변수(.env.local)에
-              POSTGRES_URL을 설정해야 합니다.
-            </p>
-          </div>
-        </div>
-      </main>
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <FilterBar
+        days={days}
+        contentType={contentType}
+        showBookmarked={showBookmarked}
+        onDaysChange={setDays}
+        onContentTypeChange={setContentType}
+        onShowBookmarkedChange={setShowBookmarked}
+      />
+      <ArticleList
+        articles={articlesWithBookmarks}
+        loading={loading}
+        error={error}
+        onRetry={handleRetry}
+        readArticles={readArticles}
+        onRead={handleRead}
+        onBookmark={handleBookmark}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={handlePageChange}
+      />
     </div>
   );
 }

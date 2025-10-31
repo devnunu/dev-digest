@@ -5,8 +5,8 @@
 ## 기능
 
 - 📰 RSS 피드를 통한 자동 콘텐츠 수집
-- 🤖 AI 기반 콘텐츠 요약 (예정)
-- 🌏 한국어 번역 제공 (예정)
+- 🤖 AI 기반 콘텐츠 요약 (GPT-4o-mini)
+- 🌏 한국어 3-5줄 요약 제공
 - 📱 Android, iOS, Web, Backend 등 다양한 플랫폼 지원
 
 ## 기술 스택
@@ -21,6 +21,7 @@
 
 - `rss-parser`: RSS 피드 파싱
 - `@supabase/supabase-js`: Supabase 클라이언트
+- `openai`: OpenAI API 클라이언트 (GPT-4o-mini)
 - `date-fns`: 날짜 처리
 
 ## 시작하기
@@ -99,6 +100,22 @@ CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at DE
 
 4. **Run** 버튼 클릭하여 실행
 5. "Success. No rows returned" 메시지 확인
+
+#### 3.4. OpenAI API 키 설정
+
+1. [OpenAI Platform](https://platform.openai.com/api-keys)에 로그인
+2. **Create new secret key** 클릭
+3. 생성된 API 키를 복사 (주의: 한 번만 표시됩니다!)
+4. `.env.local` 파일에 추가:
+
+```env
+OPENAI_API_KEY="sk-proj-..."
+```
+
+**참고:**
+- GPT-4o-mini 모델을 사용하여 비용을 최소화합니다
+- 입력: ~$0.150 / 1M tokens, 출력: ~$0.600 / 1M tokens
+- 기사 하나당 평균 500-1000 tokens 사용 예상
 
 ### 4. 개발 서버 실행
 
@@ -199,6 +216,7 @@ CREATE TABLE articles (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT,
+  summary_ko TEXT,
   source_url TEXT UNIQUE NOT NULL,
   published_at TIMESTAMP NOT NULL,
   platform TEXT NOT NULL CHECK (platform IN ('android', 'ios', 'web', 'backend')),
@@ -208,7 +226,11 @@ CREATE TABLE articles (
 
 CREATE INDEX idx_articles_platform ON articles(platform);
 CREATE INDEX idx_articles_published_at ON articles(published_at DESC);
+CREATE INDEX idx_articles_has_summary ON articles(summary_ko) WHERE summary_ko IS NOT NULL;
 ```
+
+**컬럼 설명:**
+- `summary_ko`: AI가 생성한 한국어 요약 (3-5줄)
 
 ## RSS 피드 소스
 
@@ -226,6 +248,7 @@ CREATE INDEX idx_articles_published_at ON articles(published_at DESC);
 3. 환경변수 설정:
    - `NEXT_PUBLIC_SUPABASE_URL`: Supabase 프로젝트 URL
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anon key
+   - `OPENAI_API_KEY`: OpenAI API 키
 4. 배포
 
 또는 Vercel CLI 사용:
@@ -245,10 +268,12 @@ vercel
 - [x] RSS 피드 파싱
 - [x] 기본 API 구축
 
-### Step 2: AI 요약 기능 (예정)
-- [ ] OpenAI API 연동
-- [ ] 콘텐츠 요약 로직 구현
-- [ ] 한국어 번역 기능
+### Step 2: AI 요약 기능 ✅
+- [x] OpenAI API 연동 (GPT-4o-mini)
+- [x] 콘텐츠 요약 로직 구현
+- [x] 한국어 3-5줄 요약 생성
+- [x] 병렬 처리 및 Rate limit 관리
+- [x] 토큰 사용량 로깅
 
 ### Step 3: UI/UX 개선 (예정)
 - [ ] 메인 페이지 디자인

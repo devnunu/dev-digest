@@ -1,6 +1,8 @@
 import Parser from 'rss-parser';
 import { Article } from '@/types/article';
-import { insertArticles, createArticlesTable } from './db';
+import { insertArticles, createArticlesTable, articleExists } from './db';
+import { summarizeContent } from './openai';
+import { fetchYouTubeVideos } from './youtube';
 import { createHash } from 'crypto';
 
 // RSS 파서 인스턴스 생성
@@ -18,6 +20,21 @@ const RSS_FEEDS = {
     },
     {
       url: 'https://blog.jetbrains.com/kotlin/feed/',
+      platform: 'android' as const,
+      contentType: 'blog' as const,
+    },
+    {
+      url: 'https://androidweekly.net/rss',
+      platform: 'android' as const,
+      contentType: 'blog' as const,
+    },
+    {
+      url: 'https://medium.com/feed/tag/android',
+      platform: 'android' as const,
+      contentType: 'blog' as const,
+    },
+    {
+      url: 'https://proandroiddev.com/feed',
       platform: 'android' as const,
       contentType: 'blog' as const,
     },
@@ -65,7 +82,11 @@ function convertToArticle(
     return {
       id: generateId(item.link),
       title: item.title.trim(),
+      title_ko: null, // 초기값은 null, 나중에 번역
       description: item.contentSnippet || item.content || item.summary || '',
+      summary_ko: null, // 초기값은 null, 나중에 요약 생성
+      keywords: null, // 초기값은 null, 나중에 키워드 생성
+      content_summary: null, // 초기값은 null, 사용자가 요청 시 생성
       source_url: item.link,
       published_at: publishedAt,
       platform,
@@ -109,7 +130,7 @@ async function parseFeed(
 }
 
 /**
- * 특정 플랫폼의 모든 RSS 피드를 파싱하는 함수
+ * 특정 플랫폼의 모든 RSS 피드를 파싱하고 요약을 생성하는 함수
  */
 export async function fetchAndStoreArticles(
   platform: keyof typeof RSS_FEEDS = 'android'
@@ -129,7 +150,7 @@ export async function fetchAndStoreArticles(
       };
     }
 
-    // 모든 피드를 병렬로 파싱
+    // 모든 피드를 파싱
     const allArticles: Omit<Article, 'created_at'>[] = [];
 
     for (const feed of feeds) {
@@ -141,13 +162,79 @@ export async function fetchAndStoreArticles(
       allArticles.push(...articles);
     }
 
+    // YouTube 비디오 가져오기 (Android 플랫폼인 경우만)
+    if (platform === 'android') {
+      try {
+        console.log('[RSS] Fetching YouTube videos...');
+        const youtubeVideos = await fetchYouTubeVideos();
+        allArticles.push(...youtubeVideos);
+        console.log(`[RSS] Added ${youtubeVideos.length} YouTube videos`);
+      } catch (error) {
+        console.error('[RSS] Failed to fetch YouTube videos:', error);
+        // YouTube 실패해도 계속 진행
+      }
+    }
+
     console.log(`Total articles fetched: ${allArticles.length}`);
 
-    // 데이터베이스에 저장
-    if (allArticles.length > 0) {
-      const { successCount, skipCount } = await insertArticles(allArticles);
+    // 중복 체크 및 새 글만 필터링
+    const newArticles: Omit<Article, 'created_at'>[] = [];
+    console.log('Checking for duplicate articles...');
+
+    for (const article of allArticles) {
+      const exists = await articleExists(article.source_url);
+      if (!exists) {
+        newArticles.push(article);
+      }
+    }
+
+    console.log(`Found ${newArticles.length} new articles (${allArticles.length - newArticles.length} duplicates)`);
+
+    // 새 글이 있으면 요약 생성
+    if (newArticles.length > 0) {
+      console.log(`Generating summaries for ${newArticles.length} new articles...`);
+
+      // 병렬로 요약 생성 (동시 요청 수 제한: 3)
+      const BATCH_SIZE = 3;
+      let summarizedCount = 0;
+      let totalTokens = 0;
+
+      for (let i = 0; i < newArticles.length; i += BATCH_SIZE) {
+        const batch = newArticles.slice(i, i + BATCH_SIZE);
+
+        const summaryPromises = batch.map(async (article) => {
+          try {
+            const result = await summarizeContent(article.title, article.description);
+
+            if (result) {
+              article.title_ko = result.title_ko;
+              article.summary_ko = result.summary;
+              article.keywords = result.keywords;
+              summarizedCount++;
+              totalTokens += result.tokens;
+              console.log(`[${summarizedCount}/${newArticles.length}] Summary generated: "${article.title_ko}" [${result.keywords.join(', ')}]`);
+            } else {
+              console.warn(`[${summarizedCount}/${newArticles.length}] Summary failed: "${article.title}"`);
+            }
+          } catch (error) {
+            console.error(`Error summarizing article "${article.title}":`, error);
+          }
+        });
+
+        await Promise.all(summaryPromises);
+
+        // Rate limit 방지를 위한 딜레이 (마지막 배치 제외)
+        if (i + BATCH_SIZE < newArticles.length) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      console.log(`Summaries generated: ${summarizedCount}/${newArticles.length} (${totalTokens} tokens used)`);
+
+      // 데이터베이스에 저장
+      const { successCount, skipCount } = await insertArticles(newArticles);
       console.log(
-        `Stored ${successCount} new articles, ${skipCount} duplicates skipped`
+        `Stored ${successCount} new articles, ${skipCount} failed`
       );
 
       return {
@@ -155,6 +242,7 @@ export async function fetchAndStoreArticles(
         count: successCount,
       };
     } else {
+      console.log('No new articles to process');
       return {
         success: true,
         count: 0,
