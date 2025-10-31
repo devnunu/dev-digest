@@ -39,6 +39,9 @@ const RSS_FEEDS = {
       contentType: 'blog' as const,
     },
   ],
+  ios: [],
+  web: [],
+  backend: [],
 } as const;
 
 /**
