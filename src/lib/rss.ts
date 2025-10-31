@@ -133,7 +133,7 @@ async function parseFeed(
  * 특정 플랫폼의 모든 RSS 피드를 파싱하고 요약을 생성하는 함수
  */
 export async function fetchAndStoreArticles(
-  platform: keyof typeof RSS_FEEDS = 'android'
+  platform: 'android' | 'ios' | 'web' | 'backend' = 'android'
 ): Promise<{ success: boolean; count: number; error?: string }> {
   try {
     console.log(`Starting to fetch articles for platform: ${platform}`);
